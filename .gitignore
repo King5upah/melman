@@ -9,6 +9,8 @@ venv/
 
 # Local config / secrets (never commit)
 accounts.json
+credentials.json
+token-*.json
 *.local
 
 # OS

@@ -32,6 +32,7 @@ def config_path() -> Path:
 @dataclass
 class Account:
     email: str
+    backend: str = "imap"  # "imap" (App Password) or "gmail" (OAuth Gmail API)
     imap_host: str = GMAIL_IMAP[0]
     imap_port: int = GMAIL_IMAP[1]
     smtp_host: str = GMAIL_SMTP[0]
@@ -42,6 +43,11 @@ class Account:
 
     def set_password(self, pw: str) -> None:
         keyring.set_password(KEYRING_SERVICE, self.email, pw)
+
+    def token_path(self) -> Path:
+        # OAuth token (has refresh_token). Lives in config dir, never in repo.
+        safe = self.email.replace("@", "_at_").replace("/", "_")
+        return config_dir() / f"token-{safe}.json"
 
 
 def load_accounts() -> dict[str, Account]:

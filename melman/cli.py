@@ -12,7 +12,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from . import __version__, mailbox
+from . import __version__, gmail_api, mailbox
 from .config import (
     GMAIL_IMAP,
     GMAIL_SMTP,
@@ -21,6 +21,11 @@ from .config import (
     load_accounts,
     save_account,
 )
+
+
+def _backend(acc: Account):
+    """Pick the transport module for an account. Same function signatures both ways."""
+    return gmail_api if acc.backend == "gmail" else mailbox
 
 app = typer.Typer(
     name="melman",
@@ -81,6 +86,42 @@ def setup(
 
 
 @app.command()
+def auth(
+    email: str = typer.Option(..., prompt="Gmail address"),
+    credentials: str = typer.Option(
+        "credentials.json",
+        "--credentials",
+        "-c",
+        help="Path to the OAuth 'Desktop app' client JSON from Google Cloud Console.",
+    ),
+):
+    """Authorize via OAuth in the browser (Gmail API backend).
+
+    One-time prep in Google Cloud Console: create a project, enable the Gmail
+    API, create an OAuth 'Desktop app' client, download its JSON, and add
+    yourself as a test user. Then run this — it opens the browser for consent
+    and stores the token in your config dir (never in the repo).
+    """
+    from . import auth as auth_mod
+
+    acc = Account(email=email, backend="gmail")
+    console.print("[cyan]Opening browser for Google consent…[/]")
+    try:
+        auth_mod.authorize(credentials, acc.token_path())
+    except Exception as e:  # noqa: BLE001
+        err.print(f"[red]Authorization failed:[/] {e}")
+        raise typer.Exit(1)
+    save_account(acc)
+    console.print(f"[green]✓ Authorized[/] [bold]{email}[/]. Testing API…")
+    try:
+        gmail_api.list_inbox(acc, limit=1)
+    except Exception as e:  # noqa: BLE001
+        err.print(f"[red]API call failed:[/] {e}")
+        raise typer.Exit(1)
+    console.print("[green]✓ Gmail API OK.[/]")
+
+
+@app.command()
 def accounts(json: bool = typer.Option(False, "--json")):
     """List configured accounts."""
     accs = load_accounts()
@@ -102,7 +143,7 @@ def inbox(
 ):
     """List recent messages, newest first."""
     acc = _account_or_die()
-    msgs = mailbox.list_inbox(acc, limit=limit, mailbox=mailbox_name)
+    msgs = _backend(acc).list_inbox(acc, limit=limit, mailbox=mailbox_name)
     if json:
         _emit([m.to_dict() for m in msgs], True)
         return
@@ -117,7 +158,7 @@ def search(
 ):
     """Full-text search the mailbox."""
     acc = _account_or_die()
-    msgs = mailbox.search(acc, query, limit=limit)
+    msgs = _backend(acc).search(acc, query, limit=limit)
     if json:
         _emit([m.to_dict() for m in msgs], True)
         return
@@ -133,7 +174,7 @@ def read(
 ):
     """Read a single message by UID."""
     acc = _account_or_die()
-    msg = mailbox.read_message(acc, uid, mailbox=mailbox_name, mark_seen=mark_seen)
+    msg = _backend(acc).read_message(acc, uid, mailbox=mailbox_name, mark_seen=mark_seen)
     if json:
         _emit(msg.to_dict(), True)
         return
@@ -164,7 +205,7 @@ def send(
         console.print(Panel(f"To: {to}\nSubject: {subject}\n\n{body}", title="Send?"))
         if not typer.confirm("Send this?"):
             raise typer.Abort()
-    mailbox.send_message(acc, to=to, subject=subject, body=body, cc=cc)
+    _backend(acc).send_message(acc, to=to, subject=subject, body=body, cc=cc)
     if json:
         _emit({"sent": True, "to": to, "subject": subject}, True)
     else:

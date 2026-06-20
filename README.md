@@ -36,6 +36,35 @@ melman setup
 It logs in once to verify. Other IMAP/SMTP providers: pass `--imap-host`,
 `--smtp-host`, etc. at setup.
 
+## Setup (Gmail API + OAuth, browser login)
+
+Alternative to App Password — browser consent, granular scopes, no plaintext
+secret. More one-time setup.
+
+```bash
+pip install -e .[gmail]
+```
+
+One-time in [Google Cloud Console](https://console.cloud.google.com/):
+
+1. Create a project.
+2. Enable the **Gmail API**.
+3. OAuth consent screen → External → add yourself as a **test user**.
+4. Credentials → Create → **OAuth client ID** → **Desktop app** → download JSON,
+   save as `credentials.json`.
+
+Then:
+
+```bash
+melman auth --email you@gmail.com -c path/to/credentials.json
+```
+
+Opens the browser, you consent, the token (with refresh) is stored in your
+config dir — never in the repo. Scopes: `gmail.modify` + `gmail.send`.
+
+After this, all commands below work against the Gmail API. `search` accepts
+native Gmail syntax (`from:`, `subject:`, `has:attachment`, …).
+
 ## Human usage
 
 ```bash
@@ -81,7 +110,7 @@ configured account.
 
 ## Roadmap
 
-- [ ] Gmail API backend (labels, threads, push) as alternative to IMAP
+- [x] Gmail API backend (OAuth browser login) as alternative to IMAP
 - [ ] Attachments (download / send)
 - [ ] Threaded conversation view
 - [ ] `melman watch` — poll + notify on new mail
