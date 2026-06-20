@@ -89,6 +89,20 @@ melman search "from:bank" --json
 melman send --to a@b.com --subject "Re" --body "ok" --json
 ```
 
+### Claude Code skill
+
+There's a ready-made [Claude Code](https://claude.com/claude-code) skill that
+drives melman as an email agent (triage, summarize, draft, confirm-before-send):
+
+**https://github.com/King5upah/melman-skill**
+
+```bash
+git clone https://github.com/King5upah/melman-skill
+cp -r melman-skill/melman ~/.claude/skills/
+```
+
+Then: "revisa mi correo", "resume mis correos", "/melman".
+
 ### Wiring as agent tools
 
 Expose these as shell tools to an LLM. Suggested split:
