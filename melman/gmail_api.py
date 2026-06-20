@@ -126,6 +126,143 @@ def _decode_part(part: dict) -> str:
     return raw.decode("utf-8", errors="replace")
 
 
+def search_ids(acc: Account, query: str, max_results: int = 2000) -> list[str]:
+    """Return message IDs matching a Gmail query, paging until max_results."""
+    svc = _service(acc)
+    ids: list[str] = []
+    page = None
+    while len(ids) < max_results:
+        resp = (
+            svc.users()
+            .messages()
+            .list(userId="me", q=query, maxResults=500, pageToken=page)
+            .execute()
+        )
+        ids.extend(m["id"] for m in resp.get("messages", []))
+        page = resp.get("nextPageToken")
+        if not page:
+            break
+    return ids[:max_results]
+
+
+def fetch_meta(acc: Account, uid: str) -> Summary:
+    """One message's header summary (From/Subject/Date + unread flag)."""
+    svc = _service(acc)
+    meta = (
+        svc.users()
+        .messages()
+        .get(
+            userId="me",
+            id=uid,
+            format="metadata",
+            metadataHeaders=["From", "Subject", "Date"],
+        )
+        .execute()
+    )
+    return _summary_from_meta(meta)
+
+
+def get_or_create_label(acc: Account, name: str) -> str:
+    """Return the label ID for `name`, creating it if missing."""
+    svc = _service(acc)
+    existing = svc.users().labels().list(userId="me").execute().get("labels", [])
+    for lab in existing:
+        if lab["name"].lower() == name.lower():
+            return lab["id"]
+    created = (
+        svc.users()
+        .labels()
+        .create(
+            userId="me",
+            body={
+                "name": name,
+                "labelListVisibility": "labelShow",
+                "messageListVisibility": "show",
+            },
+        )
+        .execute()
+    )
+    return created["id"]
+
+
+def batch_modify(
+    acc: Account,
+    ids: list[str],
+    add: list[str] | None = None,
+    remove: list[str] | None = None,
+) -> int:
+    """Bulk add/remove labels on up to thousands of messages (1000 per API call)."""
+    if not ids:
+        return 0
+    svc = _service(acc)
+    body = {}
+    if add:
+        body["addLabelIds"] = add
+    if remove:
+        body["removeLabelIds"] = remove
+    done = 0
+    for i in range(0, len(ids), 1000):
+        chunk = ids[i : i + 1000]
+        svc.users().messages().batchModify(userId="me", body={"ids": chunk, **body}).execute()
+        done += len(chunk)
+    return done
+
+
+def unsubscribe_info(acc: Account, uid: str) -> dict:
+    """Read RFC-2369 List-Unsubscribe headers for one message. Returns the sender,
+    any https/mailto unsubscribe targets, and whether RFC-8058 one-click is offered."""
+    import re
+
+    svc = _service(acc)
+    meta = (
+        svc.users()
+        .messages()
+        .get(
+            userId="me",
+            id=uid,
+            format="metadata",
+            metadataHeaders=["From", "List-Unsubscribe", "List-Unsubscribe-Post"],
+        )
+        .execute()
+    )
+    headers = meta.get("payload", {}).get("headers", [])
+    raw = _header(headers, "List-Unsubscribe")
+    post = _header(headers, "List-Unsubscribe-Post")
+    targets = re.findall(r"<([^>]+)>", raw)
+    https = [t for t in targets if t.lower().startswith("http")]
+    mailto = [t for t in targets if t.lower().startswith("mailto:")]
+    return {
+        "uid": uid,
+        "from": _header(headers, "From"),
+        "https": https,
+        "mailto": mailto,
+        "one_click": "one-click" in post.lower() and bool(https),
+        "has_target": bool(https or mailto),
+    }
+
+
+def unsubscribe_one_click(url: str) -> int:
+    """RFC-8058 one-click: POST the unsubscribe body to the https target. Returns
+    the HTTP status code. No auth/cookies — these endpoints are token-keyed."""
+    import urllib.request
+
+    data = b"List-Unsubscribe=One-Click"
+    req = urllib.request.Request(
+        url,
+        data=data,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=20) as resp:
+        return resp.status
+
+
+def trash_message(acc: Account, uid: str) -> None:
+    """Move a message to Trash (recoverable for 30 days)."""
+    svc = _service(acc)
+    svc.users().messages().trash(userId="me", id=uid).execute()
+
+
 def send_message(acc: Account, to: str, subject: str, body: str, cc: str | None = None) -> None:
     svc = _service(acc)
     msg = EmailMessage()

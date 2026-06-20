@@ -166,6 +166,98 @@ def search(
 
 
 @app.command()
+def unsubscribe(
+    query: str = typer.Option("category:promotions OR unsubscribe", "--query", "-q"),
+    exclude: str = typer.Option(
+        "", "--exclude", "-x", help="Comma list of substrings; senders matching any are KEPT."
+    ),
+    limit: int = typer.Option(60, "-n", "--limit"),
+    auto: bool = typer.Option(False, "--auto", help="One-click POST + mailto unsubscribe automatically."),
+    trash: bool = typer.Option(False, "--trash", help="Also move matching messages to Trash."),
+    json: bool = typer.Option(False, "--json"),
+):
+    """Find subscription mail and unsubscribe. Dedups by sender; --exclude keeps
+    senders you want. Gmail backend only. --auto does RFC-8058 one-click where
+    offered and emails the mailto target otherwise. Without --auto, prints links."""
+    acc = _account_or_die()
+    if acc.backend != "gmail":
+        err.print("[red]unsubscribe needs the Gmail backend.[/] Run `melman auth`.")
+        raise typer.Exit(1)
+    keep = [s.strip().lower() for s in exclude.split(",") if s.strip()]
+
+    msgs = gmail_api.search(acc, query, limit=limit)
+    # Dedup to one representative message per sender, skipping the keep-list.
+    seen: dict[str, object] = {}
+    for m in msgs:
+        sender = m.from_.lower()
+        if any(k in sender for k in keep):
+            continue
+        if sender not in seen:
+            seen[sender] = m
+    reps = list(seen.values())
+
+    results = []
+    for m in reps:
+        info = gmail_api.unsubscribe_info(acc, m.uid)
+        action = "none"
+        detail = ""
+        if auto and info["one_click"]:
+            try:
+                status = gmail_api.unsubscribe_one_click(info["https"][0])
+                action = "one-click"
+                detail = f"HTTP {status}"
+            except Exception as e:  # noqa: BLE001
+                action = "one-click-failed"
+                detail = str(e)[:60]
+        elif auto and info["mailto"]:
+            try:
+                _send_unsubscribe_mail(acc, info["mailto"][0])
+                action = "mailto"
+                detail = info["mailto"][0]
+            except Exception as e:  # noqa: BLE001
+                action = "mailto-failed"
+                detail = str(e)[:60]
+        elif info["https"]:
+            action = "link"
+            detail = info["https"][0]
+        elif info["mailto"]:
+            action = "mailto-link"
+            detail = info["mailto"][0]
+        if trash and info["has_target"]:
+            try:
+                gmail_api.trash_message(acc, m.uid)
+            except Exception:  # noqa: BLE001
+                pass
+        results.append({"from": info["from"], "action": action, "detail": detail})
+
+    if json:
+        _emit(results, True)
+        return
+    table = Table(title=f"Unsubscribe — {len(results)} senders", expand=True)
+    table.add_column("From", style="cyan", max_width=38)
+    table.add_column("Action", no_wrap=True)
+    table.add_column("Detail", max_width=60, overflow="fold")
+    for r in results:
+        style = "green" if r["action"] in ("one-click", "mailto") else ""
+        table.add_row(r["from"], f"[{style}]{r['action']}[/]" if style else r["action"], r["detail"])
+    console.print(table)
+    if not auto:
+        console.print("\n[dim]Re-run with --auto to one-click/mailto these, or open the links above.[/]")
+
+
+def _send_unsubscribe_mail(acc: Account, mailto: str) -> None:
+    """Send the unsubscribe email parsed from a mailto: List-Unsubscribe target."""
+    from urllib.parse import parse_qs, unquote, urlparse
+
+    parsed = urlparse(mailto)
+    to = unquote(parsed.path)
+    qs = parse_qs(parsed.query)
+    subject = qs.get("subject", ["unsubscribe"])[0]
+    body = qs.get("body", ["unsubscribe"])[0]
+    gmail_api.send_message(acc, to=to, subject=subject, body=body)
+
+
+@app.command()
 def read(
     uid: str = typer.Argument(...),
     mailbox_name: str = typer.Option("INBOX", "--mailbox"),
