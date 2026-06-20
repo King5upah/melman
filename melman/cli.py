@@ -305,6 +305,28 @@ def send(
 
 
 @app.command()
+def filters(json: bool = typer.Option(False, "--json")):
+    """List Gmail filters (Gmail backend). Shows criteria query and label actions."""
+    acc = _account_or_die()
+    if acc.backend != "gmail":
+        err.print("[red]filters needs the Gmail backend.[/]")
+        raise typer.Exit(1)
+    fs = gmail_api.list_filters(acc)
+    if json:
+        _emit(fs, True)
+        return
+    table = Table(title=f"Filters — {len(fs)}", expand=True)
+    table.add_column("Criteria", max_width=60, overflow="fold")
+    table.add_column("Add labels", style="green")
+    for f in fs:
+        crit = f.get("criteria", {})
+        crit_s = crit.get("query") or crit.get("from") or str(crit)
+        add = ", ".join(f.get("action", {}).get("addLabelIds", []))
+        table.add_row(crit_s, add)
+    console.print(table)
+
+
+@app.command()
 def version():
     """Show version."""
     console.print(f"melman {__version__}")

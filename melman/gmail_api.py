@@ -208,6 +208,30 @@ def batch_modify(
     return done
 
 
+def create_filter(
+    acc: Account,
+    query: str,
+    add_labels: list[str] | None = None,
+    remove_labels: list[str] | None = None,
+) -> str:
+    """Create a Gmail filter. `query` accepts full Gmail search syntax. Returns the
+    filter ID. Needs the gmail.settings.basic scope."""
+    svc = _service(acc)
+    action = {}
+    if add_labels:
+        action["addLabelIds"] = add_labels
+    if remove_labels:
+        action["removeLabelIds"] = remove_labels
+    body = {"criteria": {"query": query}, "action": action}
+    res = svc.users().settings().filters().create(userId="me", body=body).execute()
+    return res["id"]
+
+
+def list_filters(acc: Account) -> list[dict]:
+    svc = _service(acc)
+    return svc.users().settings().filters().list(userId="me").execute().get("filter", [])
+
+
 def unsubscribe_info(acc: Account, uid: str) -> dict:
     """Read RFC-2369 List-Unsubscribe headers for one message. Returns the sender,
     any https/mailto unsubscribe targets, and whether RFC-8058 one-click is offered."""

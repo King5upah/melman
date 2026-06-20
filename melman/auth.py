@@ -7,10 +7,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-# Read + modify (labels, mark read) + send. No full-account delete scope.
+# Read + modify (labels, mark read) + send + manage filters/labels settings.
 SCOPES = [
     "https://www.googleapis.com/auth/gmail.modify",
     "https://www.googleapis.com/auth/gmail.send",
+    "https://www.googleapis.com/auth/gmail.settings.basic",
 ]
 
 
