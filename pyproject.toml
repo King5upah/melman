@@ -1,0 +1,17 @@
+[project]
+name = "melman"
+version = "0.1.0"
+description = "Terminal email client for Gmail (IMAP/SMTP) — usable by humans and agents"
+requires-python = ">=3.10"
+dependencies = [
+    "typer>=0.12",
+    "rich>=13.7",
+    "keyring>=25.0",
+]
+
+[project.scripts]
+melman = "melman.cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
